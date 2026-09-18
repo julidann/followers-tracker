@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -28,12 +28,11 @@ class Snapshot(Base):
 class Relationship(Base):
     __tablename__ = "relationships"
     __table_args__ = (
-        UniqueConstraint("snapshot_id", "instagram_user_id", name="uq_snapshot_instagram_user"),
+        UniqueConstraint("snapshot_id", "username", name="uq_snapshot_username"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     snapshot_id: Mapped[int] = mapped_column(ForeignKey("snapshots.id", ondelete="CASCADE"))
-    instagram_user_id: Mapped[int] = mapped_column(BigInteger)
     username: Mapped[str] = mapped_column(String(255), index=True)
-    follows_me: Mapped[int] = mapped_column(Integer, default=0)
-    i_follow: Mapped[int] = mapped_column(Integer, default=0)
+    follows_me: Mapped[bool] = mapped_column(Boolean, default=False)
+    i_follow: Mapped[bool] = mapped_column(Boolean, default=False)
