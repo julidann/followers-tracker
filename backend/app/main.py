@@ -1,6 +1,12 @@
 from contextlib import asynccontextmanager
+import os
+import secrets
+from urllib.parse import urlencode
+
+import httpx
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,6 +40,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+INSTAGRAM_CLIENT_ID = os.getenv("INSTAGRAM_CLIENT_ID", "")
+INSTAGRAM_CLIENT_SECRET = os.getenv("INSTAGRAM_CLIENT_SECRET", "")
+INSTAGRAM_REDIRECT_URI = os.getenv(
+    "INSTAGRAM_REDIRECT_URI",
+    "http://localhost:8000/api/auth/instagram/callback",
+)
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:4200")
+
+_oauth_states: set[str] = set()
+_instagram_session: dict[str, str | int | None] = {
+    "access_token": None,
+    "user_id": None,
+    "username": None,
+    "account_type": None,
+    "followers_count": None,
+    "follows_count": None,
+}
 
 
 def get_account(db: Session, username: str | None = None) -> models.InstagramAccount | None:
@@ -86,6 +110,151 @@ def relationship_sets(
 
     return followers, following
 
+
+
+@app.get("/api/auth/instagram/url")
+def instagram_auth_url():
+    if not INSTAGRAM_CLIENT_ID or not INSTAGRAM_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Faltan INSTAGRAM_CLIENT_ID o INSTAGRAM_CLIENT_SECRET en .env.",
+        )
+
+    state = secrets.token_urlsafe(24)
+    _oauth_states.add(state)
+
+    params = urlencode(
+        {
+            "client_id": INSTAGRAM_CLIENT_ID,
+            "redirect_uri": INSTAGRAM_REDIRECT_URI,
+            "response_type": "code",
+            "scope": "instagram_business_basic",
+            "state": state,
+            "force_reauth": "true",
+        }
+    )
+
+    return {
+        "url": f"https://www.instagram.com/oauth/authorize?{params}",
+    }
+
+
+@app.get("/api/auth/instagram/callback")
+def instagram_callback(
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+):
+    if error:
+        message = error_description or error
+        return RedirectResponse(
+            f"{FRONTEND_URL}/?instagram=error&message={message}"
+        )
+
+    if not code or not state or state not in _oauth_states:
+        return RedirectResponse(
+            f"{FRONTEND_URL}/?instagram=error&message=oauth_state"
+        )
+
+    _oauth_states.discard(state)
+
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            token_response = client.post(
+                "https://api.instagram.com/oauth/access_token",
+                data={
+                    "client_id": INSTAGRAM_CLIENT_ID,
+                    "client_secret": INSTAGRAM_CLIENT_SECRET,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": INSTAGRAM_REDIRECT_URI,
+                    "code": code,
+                },
+            )
+            token_response.raise_for_status()
+            token_data = token_response.json()
+
+            short_token = token_data["access_token"]
+
+            long_token_response = client.get(
+                "https://graph.instagram.com/access_token",
+                params={
+                    "grant_type": "ig_exchange_token",
+                    "client_secret": INSTAGRAM_CLIENT_SECRET,
+                    "access_token": short_token,
+                },
+            )
+            long_token_response.raise_for_status()
+            long_token = long_token_response.json().get(
+                "access_token",
+                short_token,
+            )
+
+            profile_response = client.get(
+                "https://graph.instagram.com/me",
+                params={
+                    "fields": (
+                        "id,username,account_type,"
+                        "followers_count,follows_count"
+                    ),
+                    "access_token": long_token,
+                },
+            )
+            profile_response.raise_for_status()
+            profile = profile_response.json()
+
+        _instagram_session.update(
+            {
+                "access_token": long_token,
+                "user_id": profile.get("id"),
+                "username": profile.get("username"),
+                "account_type": profile.get("account_type"),
+                "followers_count": profile.get("followers_count"),
+                "follows_count": profile.get("follows_count"),
+            }
+        )
+
+        return RedirectResponse(f"{FRONTEND_URL}/?instagram=connected")
+
+    except (httpx.HTTPError, KeyError, ValueError):
+        return RedirectResponse(
+            f"{FRONTEND_URL}/?instagram=error&message=token_exchange"
+        )
+
+
+@app.get("/api/auth/instagram/status")
+def instagram_status():
+    connected = bool(_instagram_session.get("access_token"))
+
+    return {
+        "connected": connected,
+        "user_id": _instagram_session.get("user_id") if connected else None,
+        "username": _instagram_session.get("username") if connected else None,
+        "account_type": (
+            _instagram_session.get("account_type") if connected else None
+        ),
+        "followers_count": (
+            _instagram_session.get("followers_count") if connected else None
+        ),
+        "follows_count": (
+            _instagram_session.get("follows_count") if connected else None
+        ),
+    }
+
+
+@app.post("/api/auth/instagram/logout")
+def instagram_logout():
+    _instagram_session.update(
+        {
+            "access_token": None,
+            "user_id": None,
+            "username": None,
+            "account_type": None,
+            "followers_count": None,
+            "follows_count": None,
+        }
+    )
+    return {"ok": True}
 
 @app.get("/api/health")
 def health():
