@@ -38,7 +38,7 @@ type Feature = {
           <h2>Tu comunidad, más clara.</h2>
           <p class="muted">
             @if (dashboard?.has_data) {
-              Último análisis de @{{ dashboard?.account_username }}
+              Último análisis de &#64;{{ dashboard?.account_username }}
             } @else {
               Todavía no hay un snapshot cargado.
             }
@@ -167,7 +167,7 @@ type Feature = {
               @for (username of relationshipResult.usernames; track username) {
                 <div class="user-row">
                   <div class="avatar">{{ username.charAt(0).toUpperCase() }}</div>
-                  <span>@{{ username }}</span>
+                  <span>&#64;{{ username }}</span>
                 </div>
               }
             </div>
