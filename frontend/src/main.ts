@@ -6,6 +6,7 @@ import { bootstrapApplication } from '@angular/platform-browser';
 import {
   ApiService,
   Dashboard,
+  InstagramStatus,
   RelationshipList,
   SnapshotPayload,
 } from './app/api.service';
@@ -27,8 +28,12 @@ type Feature = {
           <p class="eyebrow">PERSONAL INSTAGRAM ANALYTICS</p>
           <h1>Followers Tracker</h1>
         </div>
-        <button class="profile-button" type="button" (click)="toggleImport()">
-          {{ dashboard?.account_username ? '@' + dashboard?.account_username : 'Conectar Instagram' }}
+        <button class="profile-button" type="button" (click)="connectInstagram()">
+          @if (instagram?.connected) {
+            &#64;{{ instagram?.username }}
+          } @else {
+            Conectar Instagram
+          }
         </button>
       </header>
 
@@ -183,6 +188,7 @@ class AppComponent implements OnInit {
   private readonly api = inject(ApiService);
 
   dashboard: Dashboard | null = null;
+  instagram: InstagramStatus | null = null;
   relationshipResult: RelationshipList | null = null;
   selectedFeatureLabel = '';
 
@@ -212,7 +218,19 @@ class AppComponent implements OnInit {
   ];
 
   ngOnInit(): void {
+    this.loadInstagramStatus();
     this.loadDashboard();
+
+    const params = new URLSearchParams(window.location.search);
+    const instagramResult = params.get('instagram');
+
+    if (instagramResult === 'connected') {
+      this.showMessage('Instagram conectado correctamente.');
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (instagramResult === 'error') {
+      this.showMessage('No se pudo completar el login con Instagram.', true);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }
 
   get stats() {
@@ -222,6 +240,26 @@ class AppComponent implements OnInit {
       { label: 'Nuevos', icon: '✨', value: this.dashboard?.new_followers ?? 0 },
       { label: 'Unfollowers', icon: '📉', value: this.dashboard?.unfollowers ?? 0 },
     ];
+  }
+
+  connectInstagram(): void {
+    if (this.instagram?.connected) {
+      this.toggleImport();
+      return;
+    }
+
+    this.api.getInstagramAuthUrl().subscribe({
+      next: ({ url }) => {
+        window.location.href = url;
+      },
+      error: (error) => {
+        const detail = error?.error?.detail;
+        this.showMessage(
+          detail ?? 'No se pudo iniciar el login con Instagram.',
+          true,
+        );
+      },
+    });
   }
 
   toggleImport(): void {
@@ -288,6 +326,20 @@ class AppComponent implements OnInit {
     return new Date(value).toLocaleString('es-AR', {
       dateStyle: 'short',
       timeStyle: 'short',
+    });
+  }
+
+  private loadInstagramStatus(): void {
+    this.api.getInstagramStatus().subscribe({
+      next: (status) => {
+        this.instagram = status;
+        if (status.connected && status.username) {
+          this.accountUsername = status.username;
+        }
+      },
+      error: () => {
+        this.instagram = { connected: false, user_id: null, username: null, account_type: null, followers_count: null, follows_count: null };
+      },
     });
   }
 
