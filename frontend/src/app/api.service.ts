@@ -24,6 +24,15 @@ export interface RelationshipList {
   usernames: string[];
 }
 
+export interface InstagramStatus {
+  connected: boolean;
+  user_id: string | null;
+  username: string | null;
+  account_type: string | null;
+  followers_count: number | null;
+  follows_count: number | null;
+}
+
 export interface SnapshotPayload {
   account_username: string;
   followers: string[];
@@ -35,6 +44,18 @@ export class ApiService {
   private readonly baseUrl = 'http://localhost:8000/api';
 
   constructor(private readonly http: HttpClient) {}
+
+  getInstagramAuthUrl(): Observable<{ url: string }> {
+    return this.http.get<{ url: string }>(`${this.baseUrl}/auth/instagram/url`);
+  }
+
+  getInstagramStatus(): Observable<InstagramStatus> {
+    return this.http.get<InstagramStatus>(`${this.baseUrl}/auth/instagram/status`);
+  }
+
+  logoutInstagram(): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`${this.baseUrl}/auth/instagram/logout`, {});
+  }
 
   getDashboard(account?: string): Observable<Dashboard> {
     const params = account ? new HttpParams().set('account', account) : undefined;
